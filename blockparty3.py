@@ -4,8 +4,7 @@
 
 from functools import reduce
 
-from ortools.sat.python import cp_model
-#import constraint as C
+import constraint as C
 
 WALL_CHAR = "▓"
 
@@ -171,35 +170,32 @@ class Board(object):
 
 
     def solve(self):
-        """Fills out self.values using ormtools's CSP-SAT solver."""
-        model = cp_model.CpModel()
+        """Fills out self.values using python-constraint's CSP solver."""
+        problem = C.Problem()
         # Add variables
         nums = dict()
         for y in range(self.rows):
             for x in range(self.cols):
-                nums[x, y] = model.NewIntVar(1, len(self.segment_of((x, y))), str((x, y)))
+                if (x, y) in self.given_values:
+                    problem.addVariable((x, y), [self.given_values[x, y]])
+                else:
+                    problem.addVariable((x, y), range(1, len(self.segment_of((x, y))) + 1))
         # Add constraints: each segment must have all values different
         for segment in self.segments:
-            model.AddAllDifferent(nums[pos] for pos in segment)
-        # Add given-value constraints
-        for k, v in self.given_values.items():
-            model.Add(nums[k] == v)
+            for pos1 in segment:
+                for pos2 in segment:
+                    if pos1 < pos2:
+                        problem.addConstraint(lambda p1, p2: p1 != p2,
+                                (pos1, pos2))
         # Add look-around constraints
-        for y in range(self.rows):
-            for x in range(self.cols):
-                self.add_look_constraints((x, y), model, nums)
+        #for y in range(self.rows):
+        #    for x in range(self.cols):
+        #        self.add_look_constraints((x, y), model, nums)
         # TODO
         # Solve the CSP
-        solver = cp_model.CpSolver()
-        status = solver.Solve(model)
-        assert status == cp_model.FEASIBLE, status
-        self.solved_values = dict()
-        for y in range(self.rows):
-            for x in range(self.cols):
-                self.solved_values[x, y] = solver.Value(nums[x, y])
-
-
-
+        solution = problem.getSolution()
+        # TODO try getting all solutions?
+        self.solved_values = solution
 
     def keycode(self):
         """
@@ -208,7 +204,6 @@ class Board(object):
         """
         raise NotImplementedError() # TODO
         
-
 
 example_segments = (
         {(0,0),(0,1),(1,1),(1,2)},
