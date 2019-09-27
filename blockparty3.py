@@ -5,6 +5,7 @@
 from functools import reduce
 
 from ortools.sat.python import cp_model
+#import constraint as C
 
 WALL_CHAR = "▓"
 
@@ -27,7 +28,7 @@ class Board(object):
         # Check that all segments are within bounds
         for segment in self.segments:
             for block in segment:
-                self.assert_in_bounds(block)
+                assert self.in_bounds(block)
         # Check that every block appears in exactly one segment
         for y in range(self.rows):
             for x in range(self.cols):
@@ -36,21 +37,22 @@ class Board(object):
 
     def segment_of(self, pos):
         """Return block containing the given pos."""
-        self.assert_in_bounds(pos)
+        assert self.in_bounds(pos)
         segments_with_pos = [segment for segment in self.segments
                                 if pos in segment]
         assert len(segments_with_pos) == 1, (pos, segments_with_pos)
         return segments_with_pos[0]
 
     def same_segment(self, *positions):
+        """Return whether positions are in the same segment."""
         assert len(positions) > 1
         segment = self.segment_of(positions[0])
         return all(pos in segment for pos in positions[1:])
 
-    def assert_in_bounds(self, pos):
-        """Assert given pos is within bounds."""
-        assert 0 <= pos[0] < self.cols, pos
-        assert 0 <= pos[1] < self.rows, pos
+    def in_bounds(self, pos):
+        """Return whether given pos is within bounds."""
+        return (0 <= pos[0] < self.cols, pos
+                and 0 <= pos[1] < self.rows, pos)
 
     def str_pos(self, pos):
         """
@@ -88,6 +90,10 @@ class Board(object):
             return 2, (leftpos, rightpos)
 
     def value_at(self, pos):
+        """
+        Return value at given pos, either a given value or a value found
+        by the solver, if it's been run yet; else None.
+        """
         if self.given_values is not None:
             if pos in self.given_values:
                 return self.given_values[pos]
@@ -127,6 +133,43 @@ class Board(object):
             out += "\n"
         return out
 
+    def add_look_constraints(self, pos, model, nums):
+        """
+        Adds look-around constraint: if pos has value n, then the
+        closest other value n looking horizontally/vertically must
+        be exactly n spaces away.
+        """
+        x, y = pos
+        for possible_val in range(1, len(self.segment_of((x, y))) + 1):
+            # Build constraints that say it's no nearer than `possible_val`
+            unequal_parts = []
+            for delta in range(1, possible_val):
+                if y + delta < self.rows:
+                    unequal_parts.append(nums[x, y + delta] != possible_val)
+                if y - delta >= 0:
+                    unequal_parts.append(nums[x, y - delta] != possible_val)
+                if x + delta < self.cols:
+                    unequal_parts.append(nums[x + delta, y] != possible_val)
+                if x - delta >= 0:
+                    unequal_parts.append(nums[x - delta, y] != possible_val)
+            inequality_constraint = reduce(lambda x, y: x and y, unequal_parts, True)
+
+            # Build constraints that say a `possible_val` is exactly `possible_val` spaces away
+            equal_parts = []
+            if y + possible_val < self.rows:
+                equal_parts.append(nums[x, y + possible_val] == possible_val)
+            if y - possible_val >= 0:
+                equal_parts.append(nums[x, y - possible_val] == possible_val)
+            if x + possible_val < self.cols:
+                equal_parts.append(nums[x + possible_val, y] == possible_val)
+            if x - possible_val >= 0:
+                equal_parts.append(nums[x - possible_val, y] == possible_val)
+            equality_constraint = reduce(lambda x, y: x or y, equal_parts, False)
+
+            total_constraint = inequality_constraint and equality_constraint
+            model.Add(total_constraint).OnlyEnforceIf(nums[pos] == possible_val)
+
+
     def solve(self):
         """Fills out self.values using ormtools's CSP-SAT solver."""
         model = cp_model.CpModel()
@@ -141,7 +184,11 @@ class Board(object):
         # Add given-value constraints
         for k, v in self.given_values.items():
             model.Add(nums[k] == v)
-        # TODO add look-around constraints
+        # Add look-around constraints
+        for y in range(self.rows):
+            for x in range(self.cols):
+                self.add_look_constraints((x, y), model, nums)
+        # TODO
         # Solve the CSP
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
