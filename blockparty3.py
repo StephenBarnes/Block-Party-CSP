@@ -6,11 +6,8 @@ from functools import reduce
 
 from ortools.sat.python import cp_model
 
+WALL_CHAR = "▓"
 
-def BlockParty3(segments):
-    """CP-SAT solver for Block Party 3 puzzle by Jane Street."""
-    model = cp_model.CpModel()
-    # TODO
 
 
 class Board(object):
@@ -22,6 +19,7 @@ class Board(object):
         if given_values is None:
             given_values = dict()
         self.given_values = given_values
+        self.solved_values = None
         self.validate_unsolved()
 
     def validate_unsolved(self):
@@ -89,36 +87,80 @@ class Board(object):
             rightpos = ((x + 1) // 2, y // 2)
             return 2, (leftpos, rightpos)
 
+    def value_at(self, pos):
+        if self.given_values is not None:
+            if pos in self.given_values:
+                return self.given_values[pos]
+        if self.solved_values is not None:
+            return self.solved_values[pos]
+        return None
+
     def __str__(self):
         out = ""
         for y in range(self.rows * 2, -1, -1):
             for x in range(self.cols * 2 + 1):
                 str_code = self.str_pos((x, y))
                 if str_code is None:
-                    out += "▓"
+                    out +=  WALL_CHAR
                 else:
                     code, tup = str_code
                     if code == 1:
                         # tup is a pos
-                        if tup in self.given_values:
-                            out += str(self.given_values[tup])
-                        else:
+                        val = self.value_at(tup)
+                        if val is None:
                             out += " "
+                        else:
+                            out += str(val)
                     elif code == 2:
                         pos1, pos2 = tup
                         if self.same_segment(pos1, pos2):
                             out += " "
                         else:
-                            out += "▓"
+                            out += WALL_CHAR
                     elif code == 4:
                         if self.same_segment(*tup):
                             out += " "
                         else:
-                            out += "▓"
+                            out += WALL_CHAR
                     else:
                         assert False
             out += "\n"
         return out
+
+    def solve(self):
+        """Fills out self.values using ormtools's CSP-SAT solver."""
+        model = cp_model.CpModel()
+        # Add variables
+        nums = dict()
+        for y in range(self.rows):
+            for x in range(self.cols):
+                nums[x, y] = model.NewIntVar(1, len(self.segment_of((x, y))), str((x, y)))
+        # Add constraints: each segment must have all values different
+        for segment in self.segments:
+            model.AddAllDifferent(nums[pos] for pos in segment)
+        # Add given-value constraints
+        for k, v in self.given_values.items():
+            model.Add(nums[k] == v)
+        # TODO add look-around constraints
+        # Solve the CSP
+        solver = cp_model.CpSolver()
+        status = solver.Solve(model)
+        assert status == cp_model.FEASIBLE, status
+        self.solved_values = dict()
+        for y in range(self.rows):
+            for x in range(self.cols):
+                self.solved_values[x, y] = solver.Value(nums[x, y])
+
+
+
+
+    def keycode(self):
+        """
+        After solving board, prints out code.
+        Code is sum of largest horizontal number in each segment.
+        """
+        raise NotImplementedError() # TODO
+        
 
 
 example_segments = (
@@ -131,6 +173,11 @@ example_segments = (
         {(1,4),(2,4),(3,4)},
         )
 
-print(Board(1, 1, ({(0,0)},)))
-print(Board(2, 2, ({(0,0), (0,1), (1,0), (1,1)},)))
-print(Board(5, 5, example_segments))
+#print(Board(1, 1, ({(0,0)},)))
+#print(Board(2, 2, ({(0,0), (0,1), (1,0), (1,1)},)))
+board = Board(5, 5, example_segments, {(1,1):1})
+print(board)
+board.solve()
+print(board)
+#print(board.keycode())
+
