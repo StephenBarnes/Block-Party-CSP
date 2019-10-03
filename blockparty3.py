@@ -50,8 +50,8 @@ class Board(object):
 
     def in_bounds(self, pos):
         """Return whether given pos is within bounds."""
-        return (0 <= pos[0] < self.cols, pos
-                and 0 <= pos[1] < self.rows, pos)
+        return ((0 <= pos[0] < self.cols)
+                and (0 <= pos[1] < self.rows))
 
     def str_pos(self, pos):
         """
@@ -132,48 +132,62 @@ class Board(object):
             out += "\n"
         return out
 
-    def add_look_constraints(self, pos, model, nums):
+    def add_look_constraints(self, pos, problem):
         """
         Adds look-around constraint: if pos has value n, then the
         closest other value n looking horizontally/vertically must
         be exactly n spaces away.
         """
         x, y = pos
-        for possible_val in range(1, len(self.segment_of((x, y))) + 1):
+
+        for possible_val in range(1, len(self.segment_of(pos)) + 1):
             # Build constraints that say it's no nearer than `possible_val`
-            unequal_parts = []
+            unequal_positions = []
             for delta in range(1, possible_val):
-                if y + delta < self.rows:
-                    unequal_parts.append(nums[x, y + delta] != possible_val)
-                if y - delta >= 0:
-                    unequal_parts.append(nums[x, y - delta] != possible_val)
-                if x + delta < self.cols:
-                    unequal_parts.append(nums[x + delta, y] != possible_val)
-                if x - delta >= 0:
-                    unequal_parts.append(nums[x - delta, y] != possible_val)
-            inequality_constraint = reduce(lambda x, y: x and y, unequal_parts, True)
+                for other_pos in ((x, y + delta),
+                                  (x, y - delta),
+                                  (x + delta, y),
+                                  (x - delta, y)):
+                    if self.in_bounds(other_pos):
+                        unequal_positions.append(other_pos)
+            for unequal_pos in unequal_positions:
+                print(f"{pos} != {possible_val} or {unequal_pos} != {possible_val}")
+                # (1,3) != 2 or (1,4) != 2
+                #   this constraint is indeed added, but the "solution" doesn't obey it!
+                #
+                problem.addConstraint(lambda thispos, other_pos: ((thispos != possible_val) or (other_pos != possible_val)),
+                        (pos, unequal_pos))
+            print(problem)
+                    # NOTE there's something wrong here -- places 2 in 2 adjacent spots...
 
             # Build constraints that say a `possible_val` is exactly `possible_val` spaces away
-            equal_parts = []
-            if y + possible_val < self.rows:
-                equal_parts.append(nums[x, y + possible_val] == possible_val)
-            if y - possible_val >= 0:
-                equal_parts.append(nums[x, y - possible_val] == possible_val)
-            if x + possible_val < self.cols:
-                equal_parts.append(nums[x + possible_val, y] == possible_val)
-            if x - possible_val >= 0:
-                equal_parts.append(nums[x - possible_val, y] == possible_val)
-            equality_constraint = reduce(lambda x, y: x or y, equal_parts, False)
+            equal_positions = []
+            for other_pos in ((x, y + possible_val),
+                              (x, y - possible_val),
+                              (x + possible_val, y),
+                              (x - possible_val, y)):
+                if self.in_bounds(other_pos):
+                    equal_positions.append(other_pos)
+            if not equal_positions:
+                problem.addConstraint(lambda val: val != possible_val, (pos,))
+            else:
+                # It's just this part that causes issues; without this it works fine:
+                if False:
+                    problem.addConstraint(
+                            (lambda atpos, *rest:
+                                    ((atpos != possible_val)
+                                    or any([other == possible_val for other in rest]))),
+                            (pos, *equal_positions))
 
-            total_constraint = inequality_constraint and equality_constraint
-            model.Add(total_constraint).OnlyEnforceIf(nums[pos] == possible_val)
 
 
     def solve(self):
         """Fills out self.values using python-constraint's CSP solver."""
+        #problem = C.Problem(C.MinConflictsSolver(100000))
+        #problem = C.Problem(C.BacktrackingSolver())
+        #problem = C.Problem(C.RecursiveBacktrackingSolver())
         problem = C.Problem()
         # Add variables
-        nums = dict()
         for y in range(self.rows):
             for x in range(self.cols):
                 if (x, y) in self.given_values:
@@ -188,13 +202,13 @@ class Board(object):
                         problem.addConstraint(lambda p1, p2: p1 != p2,
                                 (pos1, pos2))
         # Add look-around constraints
-        #for y in range(self.rows):
-        #    for x in range(self.cols):
-        #        self.add_look_constraints((x, y), model, nums)
-        # TODO
+        for y in range(self.rows):
+            for x in range(self.cols):
+                self.add_look_constraints((x, y), problem)
         # Solve the CSP
         solution = problem.getSolution()
-        # TODO try getting all solutions?
+        assert solution is not None
+        #print(problem.getSolutions())
         self.solved_values = solution
 
     def keycode(self):
@@ -217,7 +231,9 @@ example_segments = (
 
 #print(Board(1, 1, ({(0,0)},)))
 #print(Board(2, 2, ({(0,0), (0,1), (1,0), (1,1)},)))
-board = Board(5, 5, example_segments, {(1,1):1})
+board = Board(5, 5, example_segments)#, {(1,1):3})
+#board = Board(2, 2, ({(0, 0)}, {(0, 1)}, {(1, 0)}, {(1, 1)}))
+#board = Board(5, 5, example_segments)
 print(board)
 board.solve()
 print(board)
